@@ -1,0 +1,147 @@
+---
+title: "qPCR Analysis"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(pander)
+
+# Open the original data frame
+file_data_in <- '2024-09-11_data_v2.csv'
+dat1 <- read.csv(file_data_in)
+dat1$sample_id <- paste(dat1$sample,dat1$condition,dat1$replicate,sep = '_')
+
+# Make a data frame that averages across the qPCR replicates.
+dat2 <- dat1
+dat2$remove <- F
+for(ii in 1:nrow(dat2)){
+  tt <- dat2$sample_id[ii]
+  t1 <- subset(dat2,dat2$sample_id == tt)
+  if(dat2$replicate_qpcr[ii] == 'r1'){dat2$ct[ii] <- mean(t1$ct)}else{dat2$remove[ii] <- T}
+}
+dat2 <- subset(dat2,dat2$remove == F)
+
+# Determine the standard curve for the standards.
+std1 <- subset(dat2,dat2$sample == 'standard')
+std1$copies <- std1$standard_quantity/std1$dilution_factor
+std1$lncopies <- log10(std1$copies)
+
+plot(std1$lncopies, std1$ct)
+
+
+# Perform linear regression
+model <- lm(ct ~ lncopies, data = std1)
+
+# Get the formula and R^2 value from the model
+formula <- gsub('x','log10(ct)', paste("y = ", round(coef(model)[2], 2), "*x +", round(coef(model)[1], 2)))
+r_squared <- summary(model)$r.squared
+r_squared_text <- paste("R² = ", round(r_squared, 3))
+
+# Create the plot
+p_std <- ggplot(std1, aes(x = lncopies, y = ct)) +
+  geom_point() +                         # Scatter plot
+  geom_smooth(method = "lm", col = "red") +  # Linear regression line
+  labs(title = paste(formula, "\n", r_squared_text),   # Title with formula and R²
+       x = "Standard Dilution",          # X-axis label
+       y = "Ct") +                       # Y-axis label
+  theme_classic()                        # A minimal theme
+
+# Process the different samples
+dat3 <- subset(dat2,dat2$sample != 'standard')
+# Get model coefficients
+intercept <- coef(model)[1]
+slope <- coef(model)[2]
+
+# Calculate lncopies for dat3 based on the model
+dat3$lncopies <- (dat3$ct - intercept) / slope
+dat3$copies <- 10^dat3$lncopies
+
+# Plot that shows all the data from the samples
+plot_ct <- ggplot(dat3, aes(x = sample, y = ct, fill = condition)) +
+  geom_boxplot() +
+  labs(title = "CT values by Sample and Condition",
+       x = "Sample",
+       y = "CT Value",
+       fill = "Condition") +
+  ylim(1, 40) +  # Set y-axis limits from 0 to 40
+  theme_classic()
+
+
+plot_copies <- ggplot(dat3, aes(x = sample, y = copies, fill = condition)) +
+  geom_boxplot() +
+  scale_y_log10() +  # Apply log10 scale to y-axis
+  labs(title = "Copies by Sample and Condition",
+       x = "Sample",
+       y = "Copies (log10)",
+       fill = "Condition") +
+  theme_classic()
+
+# Create vectors to store sample IDs and p-values
+sample_ids <- c()
+p_values <- c()
+
+# Loop through each unique sample in dat3
+for (sample_n in unique(dat3$sample)) {
+  # Subset the data for the current sample
+  sample_data <- subset(dat3, sample == sample_n)
+  
+  # Perform ANOVA
+  model <- aov(copies ~ condition, data = sample_data)
+  
+  # Extract p-value from ANOVA summary
+  p_value <- summary(model)[[1]]$`Pr(>F)`[1]
+  
+  # Append the sample ID and p-value to vectors
+  sample_ids <- c(sample_ids, sample_n)
+  p_values <- c(p_values, p_value)
+}
+
+# Create a data frame with sample IDs and p-values
+anova_pvalues_df <- data.frame(sample = sample_ids, p_value = p_values)
+
+# Display the data frame
+anova_pvalues_df
+
+# Save the processed data for viewing.
+file_data_out <- gsub('.csv','_analysis.csv',file_data_in)
+write.csv(dat3,file_data_out)
+
+```
+## Results
+
+### Standard Curve
+The standard curve was generated based on the known standard dilutions. The following plot represents the standard curve fitted with linear regression:
+
+```{r plot_std, echo=FALSE, message=FALSE}
+p_std
+```
+
+The equation for the standard curve is:
+
+`r formula`
+
+
+The R-squared value for the model is `r r_squared_text`.
+
+\newpage 
+
+### Sample Data Analysis
+
+The following plots show the distribution of Ct values and the copy number of the samples under different conditions:
+
+```{r plot_ct, echo=FALSE, fig.width=5, fig.height=3.5}
+plot_ct
+```
+
+```{r plot_copies, echo=FALSE, fig.width=5, fig.height=3.5}
+plot_copies
+```
+
+### ANOVA Results
+
+An ANOVA was performed to test for significant differences between conditions for each sample. The following table summarizes the p-values:
+
+```{r echo=FALSE, fig.cap="", warning = FALSE, message = FALSE}
+pander(anova_pvalues_df, style = 'rmarkdown', justify = c('left', 'left'), caption = "ANOVA Results for Conditions by Sample")
+```

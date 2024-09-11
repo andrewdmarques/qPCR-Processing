@@ -1,4 +1,4 @@
-# README: qPCR Analysis
+qPCR Analysis
 
 ## Description
 This project is an analysis of qPCR data, focusing on comparing Ct values and estimating copy numbers for different samples under varying conditions. The data includes both standard dilutions and experimental samples. The analysis generates a standard curve through linear regression, calculates copy numbers for each sample based on this curve, and performs ANOVA to test for significant differences between conditions for each sample.
